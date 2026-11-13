@@ -1,0 +1,59 @@
+// सामान्य खाता - Google Apps Script
+// इसे kulamabalajirajgarh@gmail.com वाले खाते से ही बनाएँ, ताकि शीट उसी की Google Drive में बने।
+
+var SHEET_FILE_NAME = "सामान्य खाता";
+var HEAD = ["आईडी","तारीख","प्रकार","श्रेणी","नाम","बिल / संदर्भ","तरीका","रकम","विवरण"];
+var KEYS = ["id","date","type","cat","party","ref","mode","amt","note"];
+
+function getSS_() {
+  var props = PropertiesService.getScriptProperties();
+  var id = props.getProperty("SS_ID");
+  if (id) return SpreadsheetApp.openById(id);
+  var ss = SpreadsheetApp.create(SHEET_FILE_NAME);   // Drive में नई शीट बनती है
+  props.setProperty("SS_ID", ss.getId());
+  return ss;
+}
+
+function tab_(ss, name) {
+  var sh = ss.getSheetByName(name);
+  if (!sh) {
+    sh = ss.insertSheet(name);
+    sh.appendRow(HEAD);
+    sh.getRange(1, 1, 1, HEAD.length).setFontWeight("bold").setBackground("#0f3d3e").setFontColor("#ffffff");
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+function doPost(e) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var r = JSON.parse(e.postData.contents);
+    var row = KEYS.map(function (k) { return r[k] || ""; });
+    row[7] = Number(r.amt) || 0;
+    var ss = getSS_();
+    tab_(ss, "सभी").appendRow(row);                         // पूरा खाता
+    var cat = String(r.cat || "अन्य").replace(/[\[\]\*\?\/\\:]/g, " ").slice(0, 90);
+    tab_(ss, cat).appendRow(row);                           // श्रेणी वाली अलग टैब
+    var first = ss.getSheetByName("Sheet1");
+    if (first && first.getLastRow() === 0 && ss.getSheets().length > 1) ss.deleteSheet(first);
+    return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(ContentService.MimeType.JSON);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function doGet() {
+  var ss = getSS_();
+  var v = tab_(ss, "सभी").getDataRange().getValues();
+  var rows = v.slice(1).map(function (a) {
+    var o = {};
+    KEYS.forEach(function (k, i) {
+      var x = a[i];
+      o[k] = (x instanceof Date) ? Utilities.formatDate(x, Session.getScriptTimeZone(), "yyyy-MM-dd") : String(x);
+    });
+    return o;
+  });
+  return ContentService.createTextOutput(JSON.stringify({ rows: rows, url: ss.getUrl() })).setMimeType(ContentService.MimeType.JSON);
+}
